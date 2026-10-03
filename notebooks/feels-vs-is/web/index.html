@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Feels vs. Is: DC bike safety</title>
-<script src="config.js?v=20261003142630"></script>
+<script src="config.js?v=20261003151906"></script>
 <style>
   :root { --bg:#0f1115; --panel:rgba(17,19,24,.92); --ink:#e9e6df; --muted:#9a978f; --line:#2a2d35; --accent:#ffb347;
           --hd:#ff4d6d; --ff:#ff9f1c; --sq:#6c8cff; --calm:#3ddc97; --mid:#3a3f4b; --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; }
@@ -78,7 +78,7 @@
 </div>
 <div id="toast"></div>
 <script>
-const BUILD = "20261003142630";
+const BUILD = "20261003151906";
 const TOKEN = (window.FVI_CONFIG && window.FVI_CONFIG.mapboxToken) || "";
 const USE_MAPBOX = /^pk\./.test(TOKEN);
 const GAP = { hidden_danger:["#ff4d6d","Hidden danger","feels safe, people get hurt"], fix_first:["#ff9f1c","Fix first","bad on both counts"],
@@ -97,6 +97,21 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt1 = v => v == null ? "n/a" : (+v).toFixed(1);
 const streetView = ll => `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${ll.lat.toFixed(6)},${ll.lng.toFixed(6)}`;
+const MLY = (window.FVI_CONFIG && window.FVI_CONFIG.mapillaryToken) || "";
+// Mapillary street-level imagery, embedded in the popup when a client token is configured.
+function mlyBlock(ll){ if (!MLY) return ""; const id = "mly" + Math.random().toString(36).slice(2); setTimeout(() => fillMly(id, ll), 0); return `<div class="mly" id="${id}"><span class="k">Looking for street-level imagery…</span></div>`; }
+async function fillMly(id, ll){
+  const el = document.getElementById(id); if (!el) return;
+  const d = 0.0006; const bbox = [ll.lng - d, ll.lat - d, ll.lng + d, ll.lat + d].map(v => v.toFixed(6)).join(",");
+  try {
+    const r = await fetch(`https://graph.mapillary.com/images?access_token=${encodeURIComponent(MLY)}&fields=id,captured_at,computed_geometry&bbox=${bbox}&limit=30`);
+    const js = await r.json();
+    const imgs = (js.data || []).map(x => { const c = x.computed_geometry ? x.computed_geometry.coordinates : null; const dist = c ? Math.hypot((c[0] - ll.lng) * Math.cos(ll.lat * Math.PI / 180), c[1] - ll.lat) * 111000 : 1e9; return { ...x, dist }; }).sort((a, b) => b.captured_at - a.captured_at).sort((a, b) => Math.round(a.dist / 15) - Math.round(b.dist / 15));
+    if (!imgs.length) { el.innerHTML = '<span class="k">No Mapillary imagery within 60 m.</span>'; return; }
+    const best = imgs[0]; const when = best.captured_at ? new Date(best.captured_at).toLocaleDateString(undefined, { year: "numeric", month: "short" }) : "";
+    el.innerHTML = `<iframe src="https://www.mapillary.com/embed?image_key=${best.id}&style=photo" allow="fullscreen" loading="lazy" title="Mapillary street-level image"></iframe><div class="mlycap">Mapillary · ${Math.round(best.dist)} m from the click${when ? " · " + when : ""} · <a target="_blank" rel="noopener" href="https://www.mapillary.com/app/?pKey=${best.id}&focus=photo">open ↗</a></div>`;
+  } catch (e) { el.innerHTML = '<span class="k">Mapillary lookup failed.</span>'; }
+}
 function toast(msg){ const t=$("toast"); t.textContent=msg; t.style.display="block"; setTimeout(()=>t.style.display="none", 2600); }
 function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
 function loadCss(href){ const l=document.createElement("link"); l.rel="stylesheet"; l.href=href; document.head.appendChild(l); }
@@ -282,7 +297,7 @@ async function init(){
   add({id:"int-dot",type:"circle",source:"intersections",paint:{"circle-radius":rad,"circle-color":"#ff4d6d","circle-opacity":0.55,"circle-blur":0.25}}, "top");
   ["lm-bikeshare","lm-shop","lm-shop-label","trail-line","trail-label"].forEach(id=>map.setLayoutProperty(id,"visibility", id.startsWith("trail") ? "visible" : "none"));
   for (const [id,p] of Object.entries({"lm-bikeshare":"Capital Bikeshare station","lm-shop":"Bike shop"})) {
-    map.on("click",id,e=>{ const q=e.features[0].properties; new GL.Popup().setLngLat(e.lngLat).setHTML(`<div class="pop"><h3>${esc(q.name)}</h3><div class="row"><span class="k">${p}</span><span>${q.capacity?q.capacity+" docks":""}</span></div><a class="sv" target="_blank" rel="noopener" href="${streetView(e.lngLat)}">Open Street View here ↗</a></div>`).addTo(map); });
+    map.on("click",id,e=>{ const q=e.features[0].properties; new GL.Popup({maxWidth:"360px"}).setLngLat(e.lngLat).setHTML(`<div class="pop"><h3>${esc(q.name)}</h3><div class="row"><span class="k">${p}</span><span>${q.capacity?q.capacity+" docks":""}</span></div>${mlyBlock(e.lngLat)}<a class="sv" target="_blank" rel="noopener" href="${streetView(e.lngLat)}">Open Google Street View ↗</a></div>`).addTo(map); });
     map.on("mouseenter",id,()=>map.getCanvas().style.cursor="pointer"); map.on("mouseleave",id,()=>map.getCanvas().style.cursor="");
   }
   renderHome(); setupSearch();
@@ -298,10 +313,10 @@ async function init(){
       <div class="row"><span class="k">Death risk if struck</span><span>${Math.round(p.death_risk_if_struck*100)}% at ${p.speed_mph} mph</span></div>
       ${p.changed?`<div class="row"><span class="k">DDOT change</span><span>${esc(p.changed_what)} · ${p.changed}</span></div>`:""}${p.planned?`<div class="row"><span class="k">Planned</span><span>${esc(p.planned)}</span></div>`:""}
       <div class="row"><span class="k">Confidence</span><span>${p.confidence}</span></div>
-      <div class="reasons">${esc(p.reasons||"")}</div><a class="sv" target="_blank" rel="noopener" href="${streetView(e.lngLat)}">Open Street View here ↗</a>${reports.streets[p.street_key]?`<button id="rep-btn">Street report: ${esc(p.street_key)} →</button>`:""}</div>`;
-    const pop=new GL.Popup({closeButton:true}).setLngLat(e.lngLat).setHTML(html).addTo(map);
+      <div class="reasons">${esc(p.reasons||"")}</div>${mlyBlock(e.lngLat)}<a class="sv" target="_blank" rel="noopener" href="${streetView(e.lngLat)}">Open Google Street View ↗</a>${reports.streets[p.street_key]?`<button id="rep-btn">Street report: ${esc(p.street_key)} →</button>`:""}</div>`;
+    const pop=new GL.Popup({closeButton:true,maxWidth:"360px"}).setLngLat(e.lngLat).setHTML(html).addTo(map);
     const btn=document.getElementById("rep-btn"); if (btn) btn.onclick=()=>{ pop.remove(); openStreet(p.street_key); }; });
-  map.on("click","int-dot",e=>{ const p=e.features[0].properties; new GL.Popup().setLngLat(e.lngLat).setHTML(`<div class="pop"><h3>${esc(p.names||"intersection")}</h3><div class="row"><span class="k">Injury crashes since Oct 2021</span><span>${p.crashes} (${p.ksi} serious)</span></div><div class="row"><span class="k">Expected for this design</span><span>${(+p.mu).toFixed(1)}</span></div><div class="row"><span class="k">EB estimate</span><span>${(+p.eb).toFixed(1)}</span></div><div class="row"><span class="k">Approaches</span><span>${p.n_approaches}</span></div><a class="sv" target="_blank" rel="noopener" href="${streetView(e.lngLat)}">Open Street View here ↗</a></div>`).addTo(map); });
+  map.on("click","int-dot",e=>{ const p=e.features[0].properties; new GL.Popup({maxWidth:"360px"}).setLngLat(e.lngLat).setHTML(`<div class="pop"><h3>${esc(p.names||"intersection")}</h3><div class="row"><span class="k">Injury crashes since Oct 2021</span><span>${p.crashes} (${p.ksi} serious)</span></div><div class="row"><span class="k">Expected for this design</span><span>${(+p.mu).toFixed(1)}</span></div><div class="row"><span class="k">EB estimate</span><span>${(+p.eb).toFixed(1)}</span></div><div class="row"><span class="k">Approaches</span><span>${p.n_approaches}</span></div>${mlyBlock(e.lngLat)}<a class="sv" target="_blank" rel="noopener" href="${streetView(e.lngLat)}">Open Google Street View ↗</a></div>`).addTo(map); });
   map.on("mouseenter","int-dot",()=>map.getCanvas().style.cursor="pointer"); map.on("mouseleave","int-dot",()=>map.getCanvas().style.cursor="");
   if (h.street && reports.streets[h.street]) openStreet(h.street); else if (h.ward && reports.wards[h.ward]) openWard(h.ward); else applyFilters();
   $("tag").textContent = USE_MAPBOX ? "Mapbox GL JS · how streets feel vs. what happens on them" : "How streets feel vs. what happens on them. 28,978 segments, 2,297 injury crashes since Oct 2021.";
