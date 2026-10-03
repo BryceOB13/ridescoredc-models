@@ -741,7 +741,7 @@ def validate(f: gpd.GeoDataFrame, clusters: gpd.GeoDataFrame, approaches: pd.Dat
     return board, curves
 
 
-WEB_FIELDS = ["name", "comfort_score", "comfort_lts", "kid_ok", "harm_score", "harm_driver", "crashes_5yr", "ksi_5yr",
+WEB_FIELDS = ["name", "street_key", "ward", "trend", "crashes_before", "crashes_after", "changed", "changed_what", "planned", "comfort_score", "comfort_lts", "kid_ok", "harm_score", "harm_driver", "crashes_5yr", "ksi_5yr",
               "node_crashes_5yr", "node_ksi_5yr", "death_risk_if_struck", "gap_class", "reasons", "confidence",
               "speed_mph", "facility"]
 
@@ -754,8 +754,11 @@ def _round_geojson(gdf: gpd.GeoDataFrame, path: pathlib.Path, places: int = 5) -
     g.to_file(path, driver="GeoJSON")
 
 
-def export_web(g: gpd.GeoDataFrame, fit: dict, out_dir: pathlib.Path = CACHE / "web") -> dict:
+def export_web(g: gpd.GeoDataFrame, fit: dict, out_dir: pathlib.Path = CACHE / "web", ward: pd.Series | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
+    g = g.copy()
+    g["street_key"] = street_key(g["name"])
+    g["ward"] = ward.values if ward is not None else ""
     seg = g[[*WEB_FIELDS, "geometry"]].copy()
     seg["geometry"] = seg.geometry.to_crs(METRIC_CRS).simplify(1.0).to_crs("EPSG:4326")
     seg["kid_ok"] = seg["kid_ok"].astype(int)
@@ -807,3 +810,255 @@ def stories(g: gpd.GeoDataFrame, fit: dict, crashes: gpd.GeoDataFrame | None = N
         out.append({"title": "Connecticut Ave NW: the lanes that were dropped", "sub": f"{int(n)} injury crashes on these blocks since Oct 2021; mostly LTS {int(ca.comfort_lts.mode().iloc[0])}. DDOT shelved its protected lanes in April 2024",
                     "center": centre(ca), "zoom": 14.5, "layer": "feels"})
     return out
+
+
+# ------------------------------------------------------- Street and ward reports
+_ABBR = {
+    r"\bSt\b": "Street", r"\bAve\b": "Avenue", r"\bRd\b": "Road", r"\bPl\b": "Place", r"\bDr\b": "Drive",
+    r"\bBlvd\b": "Boulevard", r"\bPkwy\b": "Parkway", r"\bTer\b": "Terrace", r"\bCt\b": "Court", r"\bLn\b": "Lane",
+    r"\bNW\b": "Northwest", r"\bNE\b": "Northeast", r"\bSW\b": "Southwest", r"\bSE\b": "Southeast",
+}
+
+
+def street_key(name: pd.Series) -> pd.Series:
+    """Fold '15th St NW', '15th Street Northwest' and '15th Street Northwest Cycle Track' together."""
+    s = name.astype(str).str.strip()
+    s = s.str.replace(r"\s+(Cycle ?Track|Cycleway|Bike ?Path|Trail Connector)$", "", regex=True, case=False)
+    for pat, rep in _ABBR.items():
+        s = s.str.replace(pat, rep, regex=True)
+    return s.str.replace(r"\s+", " ", regex=True)
+
+
+def _cross(node_names: object, own: str) -> str:
+    if not isinstance(node_names, str) or not node_names:
+        return ""
+    parts = [p for p in node_names.split(" & ") if street_key(pd.Series([p])).iloc[0] != own]
+    return parts[0] if parts else node_names
+
+
+def _report(sub: gpd.GeoDataFrame, iu: pd.DataFrame, approaches: pd.DataFrame, crashes: gpd.GeoDataFrame,
+            years: float, own: str | None, net_rate: float, projects: pd.DataFrame | None = None,
+            seg_project: pd.DataFrame | None = None) -> dict:
+    w = sub.geometry.to_crs("EPSG:4326")
+    km = float(sub["length_m"].sum() / 1000)
+    units = sub.drop_duplicates("unit")
+    ints = iu.loc[iu.index.isin(approaches[approaches["seg_id"].isin(sub["seg_id"])]["int_id"].unique())]
+    c = crashes[crashes["unit"].isin(units["unit"]) | crashes["int_id"].isin(ints.index)]
+    by_year = c["date"].dt.year.value_counts().sort_index()
+    kmsplit = lambda col: {str(k): round(v / 1000, 2) for k, v in sub.groupby(col)["length_m"].sum().items()}
+    blocks = (sub.sort_values("harm_score", ascending=False).drop_duplicates("unit").head(8))
+    worst_blocks = []
+    for _, r in blocks.iterrows():
+        cen = w.loc[r.name].centroid if False else sub.loc[[r.name]].geometry.to_crs(METRIC_CRS).centroid.to_crs("EPSG:4326").iloc[0]
+        worst_blocks.append({
+            "at": _cross(r["node_names"], own) if own else (r["node_names"] or ""), "name": r["name"], "gap": r["gap_class"],
+            "harm": float(r["harm_score"]), "lts": int(r["comfort_lts"]), "comfort": float(r["comfort_score"]),
+            "crashes": int(r["crashes_5yr"]), "ksi": int(r["ksi_5yr"]), "node_crashes": int(r["node_crashes_5yr"]),
+            "facility": r["facility"], "reasons": r["reasons"], "center": [round(cen.x, 5), round(cen.y, 5)],
+        })
+    wi = ints[ints["crashes"] > 0].sort_values("eb_per_yr", ascending=False).head(8)
+    pts = gpd.GeoSeries(wi["geometry"], crs=METRIC_CRS).to_crs("EPSG:4326") if len(wi) else []
+    worst_ints = [{"names": r["names"], "crashes": int(r["crashes"]), "ksi": int(r["ksi"]), "expected": round(float(r["mu"]), 2),
+                   "center": [round(p.x, 5), round(p.y, 5)]} for (_, r), p in zip(wi.iterrows(), pts)]
+    rate = float(units["crashes_5yr"].sum() / km / years) if km > 0 else 0.0
+    t_b, t_a, base = sub.attrs.get("t_before", 3.25), sub.attrs.get("t_after", 1.75), sub.attrs.get("base_ratio", 1.0)
+    before, after = int((c["date"] < TEST_START).sum()), int((c["date"] >= TEST_START).sum())
+    tlabel, tratio = trend_label(before, after, t_b, t_a, base)
+    changes = []
+    if projects is not None and seg_project is not None:
+        sp = seg_project[seg_project["seg_id"].isin(sub["seg_id"])]
+        for oid, grp in sp.groupby("OBJECTID"):
+            p = projects.loc[oid]
+            segs = sub[sub["seg_id"].isin(grp["seg_id"])]
+            if segs["length_m"].sum() < 100 and len(segs) < 3:
+                continue  # a crossing sliver of someone else's project
+            ints_p = iu.loc[iu.index.isin(approaches[approaches["seg_id"].isin(segs["seg_id"])]["int_id"].unique())]
+            item = {"what": p["label"], "bike": bool(p["bike"]), "status": p["status"], "desc": p["desc"],
+                    "completed": p["completed"].strftime("%Y-%m") if pd.notna(p["completed"]) else None,
+                    "from": str(p["FROMSTREET"] or "").title(), "to": str(p["TOSTREET"] or "").title(),
+                    "km": round(float(segs["length_m"].sum() / 1000), 2), "segments": int(len(segs))}
+            item.update(project_before_after(segs["unit"].unique(), ints_p.index, p, crashes, item["km"]))
+            changes.append(item)
+        changes.sort(key=lambda x: (x["status"] != "completed", -(x["km"] or 0)))
+    return {
+        "trend": tlabel, "trend_ratio": round(tratio, 2) if np.isfinite(tratio) else None, "base_ratio": round(base, 2),
+        "before": before, "after": after, "before_per_yr": round(before / t_b, 1), "after_per_yr": round(after / t_a, 1),
+        "changes": changes[:12], "changed_km": round(float(sub.loc[sub["changed"].notna(), "length_m"].sum() / 1000), 2) if "changed" in sub else 0,
+        "km": round(km, 2), "segments": int(len(sub)), "blocks": int(len(units)),
+        "lts_km": kmsplit("comfort_lts"), "gap_km": kmsplit("gap_class"), "facility_km": kmsplit("facility"),
+        "harm": round(float(np.average(sub["harm_score"], weights=sub["length_m"])), 1) if km > 0 else None,
+        "comfort": round(float(np.average(sub["comfort_score"], weights=sub["length_m"])), 1) if km > 0 else None,
+        "crashes": int(len(c)), "ksi": int(c["ksi"].sum()), "fatal": int(c["fatal"].sum()),
+        "block_crashes": int(units["crashes_5yr"].sum()), "int_crashes": int(ints["crashes"].sum()),
+        "int_ksi": int(ints["ksi"].sum()), "int_expected": round(float(ints["mu"].sum()), 1), "intersections": int(len(ints)),
+        "by_year": {int(k): int(v) for k, v in by_year.items()},
+        "rate_per_km_yr": round(rate, 2), "rate_vs_network": round(rate / net_rate, 1) if net_rate else None,
+        "speeding": int(c["SPEEDING_INVOLVED"].sum()) if "SPEEDING_INVOLVED" in c else 0,
+        "worst_blocks": worst_blocks, "worst_intersections": worst_ints,
+    }
+
+
+def street_reports(g: gpd.GeoDataFrame, fit: dict, approaches: pd.DataFrame, crashes: gpd.GeoDataFrame,
+                   ward: pd.Series, min_km: float = 0.4, projects: pd.DataFrame | None = None,
+                   seg_project: pd.DataFrame | None = None) -> dict:
+    """One report per street (folded across OSM and DDOT spellings), per ward, and for the network."""
+    iu, years = fit["intersections"], fit["years"]
+    s = g.copy()
+    s["street_key"] = street_key(s["name"])
+    s["ward"] = ward.values
+    net_rate = float(s.drop_duplicates("unit")["crashes_5yr"].sum() / (s["length_m"].sum() / 1000) / years)
+    rp = dict(projects=projects, seg_project=seg_project)
+    out = {"network": _report(s, iu, approaches, crashes, years, None, net_rate, **rp), "streets": {}, "wards": {}}
+    km_by = s.groupby("street_key")["length_m"].sum() / 1000
+    cr_by = s.drop_duplicates("unit").groupby("street_key")["crashes_5yr"].sum()
+    keep = km_by[(km_by >= min_km) | (cr_by.reindex(km_by.index).fillna(0) >= 2)].index
+    for key in keep:
+        sub = s[s["street_key"] == key]
+        if sub["off_street"].all() and key.lower().startswith(("path", "cycleway", "footway")):
+            continue
+        sub.attrs = s.attrs
+        out["streets"][key] = _report(sub, iu, approaches, crashes, years, key, net_rate, **rp)
+    for wd, sub in s.groupby("ward"):
+        if pd.isna(wd) or str(wd) in ("", "nan"):
+            continue
+        sub.attrs = s.attrs
+        out["wards"][str(int(float(wd)))] = _report(sub, iu, approaches, crashes, years, None, net_rate, **rp)
+    return out
+
+
+# ----------------------------------------------------- Trend, and changes on the ground
+WORKTYPE_LABEL = {
+    "CPDO-IPMA-BIKLN": "bike lane project", "CPDO-IPMA-BIKTR": "bike trail project", "CPDO-PSA-IBL": "bike and pedestrian improvement",
+    "COO-MA-TPMBIKE": "bike markings", "CPDO-IPMA-SAFE": "safety improvement", "CPDO-MM-SAFETY": "safety maintenance",
+    "COO-HSIP-IMP": "highway safety improvement", "CPDO-PSA-SSS": "safe streets study", "CPDO-HS-SPMGT": "speed management",
+    "CPDO-IPMA-SGI": "signal improvement", "CPDO-IPMA-PP": "pedestrian project", "CPDO-IPMA-PA": "pedestrian project",
+    "CPDO-IPMA-STSC": "streetscape", "COO-NSAMS-ST": "neighborhood safety (NSAMS)", "COO-NSAMS-II": "neighborhood safety (NSAMS)",
+    "COO-LIVSTDY-IMP": "livability improvement", "CPDO-IPMA-MUT": "multi-use trail",
+}  # routine re-striping (COO-MA-INSTTPM, TPMMISC) is left out: it is not a design change
+BIKE_WORKTYPES = {"CPDO-IPMA-BIKLN", "CPDO-IPMA-BIKTR", "CPDO-PSA-IBL", "COO-MA-TPMBIKE", "CPDO-IPMA-MUT"}
+
+
+def load_projects(g: gpd.GeoDataFrame, path: pathlib.Path = CACHE / "protrack_projects.parquet",
+                  snapshot: pathlib.Path = SNAPSHOT) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """DDOT ProTrack project lines matched to segments by route and measure, else by proximity.
+
+    Returns (projects, seg_project) where seg_project maps seg_id -> project OBJECTID.
+    """
+    pr = gpd.read_parquet(path)
+    pr = pr[pr["WORKTYPE"].isin(WORKTYPE_LABEL)].copy()
+    pr["label"] = pr["WORKTYPE"].map(WORKTYPE_LABEL)
+    pr["bike"] = pr["WORKTYPE"].isin(BIKE_WORKTYPES)
+    pr["completed"] = pr["ACTUALCOMPLETIONDATE"].dt.tz_localize("UTC") if pr["ACTUALCOMPLETIONDATE"].dt.tz is None else pr["ACTUALCOMPLETIONDATE"]
+    pr["status"] = np.where(pr["completed"].notna(), "completed", np.where(pr["PERCENTCOMPLETED"].fillna(0) > 0, "in progress", "planned"))
+    pr["desc"] = pr["DESCRIPTION"].fillna("").astype(str).str.split("\n").str[0].str.strip().str.slice(0, 140).replace({"None": "", "nan": ""})
+    for c in ("FROMSTREET", "TOSTREET"):
+        pr[c] = pr[c].fillna("").astype(str).replace({"None": "", "nan": ""})
+
+    meas = pd.read_parquet(snapshot, columns=["dc_ROUTEID", "dc_FROMMEASURE", "dc_TOMEASURE"]).reset_index(drop=True)
+    seg = g[["seg_id"]].copy()
+    seg["route"] = meas["dc_ROUTEID"].astype(str).values
+    seg["m0"] = meas["dc_FROMMEASURE"].values
+    seg["m1"] = meas["dc_TOMEASURE"].values
+    pm = pr[["OBJECTID", "ROUTEID", "FROMMEASURE", "TOMEASURE"]].dropna()
+    pm["ROUTEID"] = pm["ROUTEID"].astype(str)
+    j = seg.dropna(subset=["m0", "m1"]).merge(pm, left_on="route", right_on="ROUTEID")
+    lo, hi = np.minimum(j["FROMMEASURE"], j["TOMEASURE"]), np.maximum(j["FROMMEASURE"], j["TOMEASURE"])
+    overlap = np.minimum(j["m1"], hi) - np.maximum(j["m0"], lo)
+    j = j[overlap > 0.3 * (j["m1"] - j["m0"]).clip(lower=1)]
+    by_route = j[["seg_id", "OBJECTID"]]
+
+    # off-street rows and unmatched rows: within 15 m of the project line
+    rest = g[~g["seg_id"].isin(by_route["seg_id"])][["seg_id", "geometry"]].to_crs(METRIC_CRS)
+    prm = pr[["OBJECTID", "geometry"]].to_crs(METRIC_CRS)
+    near = gpd.sjoin(rest, gpd.GeoDataFrame(prm.assign(geometry=prm.buffer(15))), how="inner", predicate="intersects")
+    near = near[near.geometry.length > 0]
+    # require most of the segment inside the buffer, not a crossing
+    inside = near.apply(lambda r: prm.loc[prm["OBJECTID"] == r["OBJECTID"], "geometry"].iloc[0].buffer(15).intersection(r.geometry).length / max(r.geometry.length, 1), axis=1) if len(near) else pd.Series(dtype=float)
+    near = near[inside.values >= 0.6] if len(near) else near
+    by_space = near[["seg_id", "OBJECTID"]]
+    seg_project = pd.concat([by_route, by_space]).drop_duplicates()
+    return pr.set_index("OBJECTID"), seg_project
+
+
+def trend_label(before: float, after: float, t_before: float, t_after: float, base_ratio: float = 1.0) -> tuple[str, float]:
+    """Compare annualized crash rates since 2025 with before, relative to the citywide change.
+
+    `base_ratio` is the citywide after/before rate ratio, so 'rising' means rising faster than
+    the city as a whole, not just riding the citywide tide. Small counts get 'too few'.
+    """
+    n = before + after
+    rb, ra = before / t_before, after / t_after
+    raw = (ra / rb) if rb > 0 else (np.inf if ra > 0 else 1.0)
+    ratio = raw / base_ratio
+    if n < 3:
+        return "too few", ratio
+    p_after = (t_after * base_ratio) / (t_before + t_after * base_ratio)
+    try:
+        from scipy.stats import binomtest
+        p = binomtest(int(after), int(n), p_after).pvalue
+    except Exception:  # noqa: BLE001
+        p = 1.0
+    if ratio >= 1.5 and after >= 2:
+        return ("rising" if p < 0.2 else "rising?"), ratio
+    if ratio <= 0.67 and before >= 2:
+        return ("falling" if p < 0.2 else "falling?"), ratio
+    return "flat", ratio
+
+
+def base_trend_ratio(crashes: gpd.GeoDataFrame, split=TEST_START) -> float:
+    end = crashes["date"].max()
+    t_b, t_a = (split - CRASH_START).days / 365.25, (end - split).days / 365.25
+    b, a = int((crashes["date"] < split).sum()), int((crashes["date"] >= split).sum())
+    return (a / t_a) / (b / t_b)
+
+
+def trends(g: gpd.GeoDataFrame, crashes: gpd.GeoDataFrame, fit: dict, node_map: pd.DataFrame, split=TEST_START) -> gpd.GeoDataFrame:
+    """Per segment: crashes before and since the split, on its block and at its worst intersection, with a label."""
+    out = g.copy()
+    end = crashes["date"].max()
+    t_b, t_a = (split - CRASH_START).days / 365.25, (end - split).days / 365.25
+    base = base_trend_ratio(crashes, split)
+    out.attrs["t_before"], out.attrs["t_after"], out.attrs["base_ratio"] = t_b, t_a, base
+    early, late = crashes[crashes["date"] < split], crashes[crashes["date"] >= split]
+    bl = lambda c: c[c["path"].isin(["blockkey", "nearest_segment"])].groupby("unit").size()
+    nd = lambda c: c[c["path"] == "intersection"].groupby("int_id").size()
+    out["block_before"] = out["unit"].map(bl(early)).fillna(0).astype(int)
+    out["block_after"] = out["unit"].map(bl(late)).fillna(0).astype(int)
+    nb, na = nd(early), nd(late)
+    out["node_before"] = out["node_int_id"].map(nb).fillna(0).astype(int)
+    out["node_after"] = out["node_int_id"].map(na).fillna(0).astype(int)
+    before = out["block_before"] + out["node_before"]
+    after = out["block_after"] + out["node_after"]
+    lab = [trend_label(b, a, t_b, t_a, base) for b, a in zip(before, after)]
+    out["trend"] = [x[0] for x in lab]
+    out["trend_ratio"] = [round(x[1], 2) if np.isfinite(x[1]) else None for x in lab]
+    out["crashes_before"] = before
+    out["crashes_after"] = after
+    return out
+
+
+def attach_projects(g: gpd.GeoDataFrame, projects: pd.DataFrame, seg_project: pd.DataFrame) -> gpd.GeoDataFrame:
+    """Per segment: the latest completed bike/safety project and whether one is planned or in progress."""
+    out = g.copy()
+    sp = seg_project.join(projects[["completed", "status", "label", "bike", "desc"]], on="OBJECTID")
+    done = sp[sp["status"] == "completed"].sort_values("completed").drop_duplicates("seg_id", keep="last").set_index("seg_id")
+    out["changed"] = out["seg_id"].map(done["completed"].dt.strftime("%Y-%m"))
+    out["changed_what"] = out["seg_id"].map(done["label"])
+    out["changed_desc"] = out["seg_id"].map(done["desc"])
+    pend = sp[sp["status"] != "completed"].drop_duplicates("seg_id").set_index("seg_id")
+    out["planned"] = out["seg_id"].map(pend["label"])
+    out["planned_desc"] = out["seg_id"].map(pend["desc"])
+    return out
+
+
+def project_before_after(units: pd.Series, int_ids: pd.Series, project, crashes: gpd.GeoDataFrame, length_km: float) -> dict:
+    """Annualized injury crash rate on the matched blocks and intersections before and after completion."""
+    c = crashes[crashes["unit"].isin(units) | crashes["int_id"].isin(int_ids)]
+    t = project["completed"]
+    if pd.isna(t):
+        return {}
+    end = crashes["date"].max()
+    tb, ta = max((t - CRASH_START).days / 365.25, 0), max((end - t).days / 365.25, 0)
+    b, a = int((c["date"] < t).sum()), int((c["date"] >= t).sum())
+    return {"before": b, "after": a, "years_before": round(tb, 1), "years_after": round(ta, 1),
+            "before_per_yr": round(b / tb, 2) if tb >= 0.5 else None, "after_per_yr": round(a / ta, 2) if ta >= 0.5 else None}
