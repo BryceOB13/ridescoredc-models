@@ -1,3 +1,6 @@
-// Paste a Mapbox public token (pk....) to render with Mapbox GL JS and the Mapbox dark style.
-// Leave it empty and the page falls back to MapLibre GL with OpenFreeMap's dark style (no key needed).
-window.FVI_CONFIG = { mapboxToken: "" };
+// Tokens are injected at publish time from ~/.config/feels-vs-is/tokens.env by cache/publish_pages.sh.
+// Keep this file empty in git. Both are public client tokens (they ship in the page), but they stay out of the source branch.
+//   MAPBOX_TOKEN    pk....   from account.mapbox.com, restrict it to https://bryceob13.github.io
+//   MAPILLARY_TOKEN MLY|...  from mapillary.com/dashboard/developers
+// Empty mapbox token: the page falls back to MapLibre + OpenFreeMap. Empty mapillary token: popups keep the Google Street View link only.
+window.FVI_CONFIG = { mapillaryToken: "", mapboxToken: "" };
