@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Feels vs. Is: DC bike safety</title>
+<link href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+<style>
+  :root {
+    --bg: #0f1115; --panel: rgba(17, 19, 24, 0.88); --ink: #e9e6df; --muted: #9a978f; --line: #2a2d35;
+    --accent: #ffb347; --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font); }
+  #map { position: absolute; inset: 0; }
+  .panel { position: absolute; z-index: 2; background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+           backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 8px 30px rgba(0,0,0,.45); }
+  #top { top: 14px; left: 14px; width: 330px; padding: 14px 16px 12px; }
+  #top h1 { font-size: 20px; margin: 0 0 2px; letter-spacing: -0.01em; }
+  #top h1 span { color: var(--muted); font-weight: 400; }
+  #top p { margin: 4px 0 10px; font-size: 12.5px; color: var(--muted); line-height: 1.4; }
+  .tabs { display: flex; gap: 4px; background: #1a1d24; padding: 4px; border-radius: 9px; }
+  .tabs button { flex: 1; border: 0; background: transparent; color: var(--muted); font: 600 12.5px var(--font); padding: 7px 0;
+                 border-radius: 7px; cursor: pointer; }
+  .tabs button.on { background: #2b2f39; color: var(--ink); }
+  .legend { margin-top: 10px; font-size: 12px; }
+  .ramp { height: 8px; border-radius: 4px; margin: 6px 0 3px; }
+  .ramp-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; }
+  .cat { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .sw { width: 22px; height: 6px; border-radius: 3px; }
+  .stories { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+  .stories button { text-align: left; border: 1px solid var(--line); background: #171a21; color: var(--ink); border-radius: 8px;
+                    padding: 7px 10px; font: 500 12.5px var(--font); cursor: pointer; }
+  .stories button:hover { border-color: var(--accent); }
+  .stories small { display: block; color: var(--muted); font-weight: 400; margin-top: 1px; }
+  .links { margin-top: 10px; font-size: 11.5px; color: var(--muted); }
+  .links a { color: var(--accent); text-decoration: none; }
+  .toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; margin-top: 8px; color: var(--muted); }
+  .maplibregl-popup-content { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 10px;
+                              font-family: var(--font); font-size: 12.5px; padding: 12px 14px; max-width: 300px; box-shadow: 0 8px 30px rgba(0,0,0,.5); }
+  .maplibregl-popup-tip { border-top-color: #1a1d24 !important; border-bottom-color: #1a1d24 !important; }
+  .maplibregl-popup-close-button { color: var(--muted); font-size: 16px; }
+  .pop h3 { margin: 0 0 6px; font-size: 14px; }
+  .pop .row { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; }
+  .pop .k { color: var(--muted); }
+  .pop .cls { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; margin-bottom: 6px; }
+  .pop .reasons { color: var(--ink); margin-top: 6px; font-size: 12px; line-height: 1.35; border-top: 1px solid var(--line); padding-top: 6px; }
+  @media (max-width: 600px) { #top { width: calc(100% - 28px); } }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="top" class="panel">
+  <h1>Feels vs. Is <span>· DC bike safety</span></h1>
+  <p id="blurb">LTS says how a street feels. Crashes say what happens on it. This map scores both for every DC street and shows where they disagree.</p>
+  <div class="tabs">
+    <button data-layer="feels" class="on">Feels</button>
+    <button data-layer="is">Is</button>
+    <button data-layer="gap">Gap</button>
+  </div>
+  <div class="legend" id="legend"></div>
+  <label class="toggle"><input type="checkbox" id="dots" checked> intersection crashes (size = crashes, ring = serious)</label>
+  <div class="stories" id="stories"></div>
+  <div class="links">
+    <a href="https://github.com/BryceOB13/ridescoredc-models/tree/feature/safety-model/notebooks/feels-vs-is#readme">README</a> ·
+    <a id="prlink" href="https://github.com/civictechdc/ridescoredc-models/pulls">PR</a> ·
+    snapshot 2026-09-29 · crashes Oct 2021 to Oct 2026
+  </div>
+</div>
+<script>
+const LAYERS = {
+  feels: { title: "Feels: comfort (LTS-based)", prop: "comfort_score",
+           ramp: ["#b1152a", "#e8632d", "#f2c14e", "#79b64a", "#1f8a4c"], low: "stressful", high: "comfortable",
+           blurb: "Comfort 0 to 100 from the street's design: facility, speed, lanes, volume, parking, pavement. Furth's Level of Traffic Stress with Montgomery County amendments." },
+  is:    { title: "Is: harm (Empirical Bayes crash rate)", prop: "harm_score",
+           ramp: ["#1f8a4c", "#79b64a", "#f2c14e", "#e8632d", "#b1152a"], low: "low harm", high: "high harm",
+           blurb: "Harm 0 to 100: five years of bicyclist injury crashes, smoothed by what streets of the same design usually see. A segment is as risky as its worst part, block or intersection." },
+  gap:   { title: "Gap: where Feels and Is disagree", prop: "gap_class",
+           cats: { hidden_danger: ["#ff4d6d", "Hidden danger: feels safe, people get hurt"],
+                   fix_first: ["#ff9f1c", "Fix first: bad on both counts"],
+                   scary_but_quiet: ["#6c8cff", "Scary but quiet: hostile, few crashes, riders avoid it"],
+                   calm: ["#3ddc97", "Calm: fine on both"],
+                   middle: ["#3a3f4b", "Middle"] },
+           blurb: "Where the stress score and the crash record disagree. Hidden danger is the short list to look at first." }
+};
+const map = new maplibregl.Map({
+  container: "map", style: "https://tiles.openfreemap.org/styles/dark",
+  center: [-77.025, 38.905], zoom: 12.2, pitch: 0, attributionControl: { compact: true }
+});
+map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+map.addControl(new maplibregl.FullscreenControl(), "top-right");
+
+function rampExpr(prop, ramp) {
+  const stops = [0, 25, 50, 75, 100];
+  const e = ["interpolate", ["linear"], ["coalesce", ["get", prop], 0]];
+  stops.forEach((s, i) => e.push(s, ramp[i]));
+  return e;
+}
+function gapExpr() {
+  const m = ["match", ["get", "gap_class"]];
+  for (const [k, v] of Object.entries(LAYERS.gap.cats)) m.push(k, v[0]);
+  m.push("#3a3f4b");
+  return m;
+}
+const CLASS_LABEL = { hidden_danger: "Hidden danger", fix_first: "Fix first", scary_but_quiet: "Scary but quiet", calm: "Calm", middle: "Middle" };
+
+map.on("load", async () => {
+  map.addSource("segments", { type: "geojson", data: "segments.geojson" });
+  map.addSource("intersections", { type: "geojson", data: "intersections.geojson" });
+  // casing so lines read on the dark basemap
+  map.addLayer({ id: "seg-case", type: "line", source: "segments",
+    paint: { "line-color": "#05060a", "line-opacity": 0.9,
+             "line-width": ["interpolate", ["linear"], ["zoom"], 11, 1.6, 14, 4.5, 17, 11] },
+    layout: { "line-cap": "round", "line-join": "round" } });
+  map.addLayer({ id: "seg", type: "line", source: "segments",
+    paint: { "line-color": rampExpr("comfort_score", LAYERS.feels.ramp), "line-opacity": 0.95,
+             "line-width": ["interpolate", ["linear"], ["zoom"], 11, 0.8, 14, 2.6, 17, 7] },
+    layout: { "line-cap": "round", "line-join": "round" } });
+  map.addLayer({ id: "int-ring", type: "circle", source: "intersections",
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, ["*", 0.9, ["sqrt", ["get", "crashes"]]], 15, ["*", 3.4, ["sqrt", ["get", "crashes"]]]],
+             "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#ffffff",
+             "circle-stroke-width": ["case", [">", ["get", "ksi"], 0], 1.6, 0.6],
+             "circle-stroke-opacity": ["case", [">", ["get", "ksi"], 0], 0.95, 0.35] } });
+  map.addLayer({ id: "int-dot", type: "circle", source: "intersections",
+    paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, ["*", 0.9, ["sqrt", ["get", "crashes"]]], 15, ["*", 3.4, ["sqrt", ["get", "crashes"]]]],
+             "circle-color": "#ff4d6d", "circle-opacity": 0.55, "circle-blur": 0.25 } });
+
+  const stories = await fetch("stories.json").then(r => r.json()).catch(() => []);
+  const sEl = document.getElementById("stories");
+  stories.forEach(s => {
+    const b = document.createElement("button");
+    b.innerHTML = `${s.title}<small>${s.sub}</small>`;
+    b.onclick = () => { setLayer(s.layer || "gap"); map.flyTo({ center: s.center, zoom: s.zoom || 16, pitch: 45, bearing: s.bearing || -20, speed: 0.9 }); };
+    sEl.appendChild(b);
+  });
+  setLayer("feels");
+});
+
+function setLayer(key) {
+  const L = LAYERS[key];
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.layer === key));
+  document.getElementById("blurb").textContent = L.blurb;
+  if (key === "gap") {
+    map.setPaintProperty("seg", "line-color", gapExpr());
+    map.setPaintProperty("seg", "line-opacity", ["case", ["==", ["get", "gap_class"], "middle"], 0.35, 1]);
+    document.getElementById("legend").innerHTML = `<b>${L.title}</b>` + Object.values(L.cats).map(([c, t]) => `<div class="cat"><span class="sw" style="background:${c}"></span>${t}</div>`).join("");
+  } else {
+    map.setPaintProperty("seg", "line-color", rampExpr(L.prop, L.ramp));
+    map.setPaintProperty("seg", "line-opacity", 0.95);
+    document.getElementById("legend").innerHTML = `<b>${L.title}</b><div class="ramp" style="background:linear-gradient(90deg,${L.ramp.join(",")})"></div><div class="ramp-labels"><span>0 · ${L.low}</span><span>100 · ${L.high}</span></div>`;
+  }
+}
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => setLayer(b.dataset.layer));
+document.getElementById("dots").onchange = e => ["int-ring", "int-dot"].forEach(id => map.setLayoutProperty(id, "visibility", e.target.checked ? "visible" : "none"));
+
+const pct = v => v == null ? "n/a" : Math.round(v * 100) + "%";
+map.on("click", "seg", e => {
+  const p = e.features[0].properties;
+  const col = (LAYERS.gap.cats[p.gap_class] || ["#3a3f4b"])[0];
+  const html = `<div class="pop"><h3>${p.name || "unnamed"}</h3>
+    <span class="cls" style="background:${col}22;color:${col};border:1px solid ${col}66">${CLASS_LABEL[p.gap_class] || p.gap_class}</span>
+    <div class="row"><span class="k">Feels (comfort)</span><span>${p.comfort_score} · LTS ${p.comfort_lts}${p.kid_ok ? " · kid ok" : ""}</span></div>
+    <div class="row"><span class="k">Is (harm)</span><span>${p.harm_score} · ${p.harm_driver}</span></div>
+    <div class="row"><span class="k">Crashes on block</span><span>${p.crashes_5yr} (${p.ksi_5yr} serious)</span></div>
+    <div class="row"><span class="k">At worst intersection</span><span>${p.node_crashes_5yr} (${p.node_ksi_5yr} serious)</span></div>
+    <div class="row"><span class="k">Death risk if struck</span><span>${pct(p.death_risk_if_struck)} at ${p.speed_mph} mph</span></div>
+    <div class="row"><span class="k">Confidence</span><span>${p.confidence}</span></div>
+    <div class="reasons">${p.reasons || ""}</div></div>`;
+  new maplibregl.Popup({ closeButton: true }).setLngLat(e.lngLat).setHTML(html).addTo(map);
+});
+map.on("click", "int-dot", e => {
+  const p = e.features[0].properties;
+  new maplibregl.Popup().setLngLat(e.lngLat).setHTML(`<div class="pop"><h3>${p.names || "intersection"}</h3>
+    <div class="row"><span class="k">Injury crashes since Oct 2021</span><span>${p.crashes} (${p.ksi} serious)</span></div>
+    <div class="row"><span class="k">Expected for this design</span><span>${(+p.mu).toFixed(1)}</span></div>
+    <div class="row"><span class="k">EB estimate</span><span>${(+p.eb).toFixed(1)}</span></div>
+    <div class="row"><span class="k">Approaches</span><span>${p.n_approaches}</span></div></div>`).addTo(map);
+});
+["seg", "int-dot"].forEach(id => { map.on("mouseenter", id, () => map.getCanvas().style.cursor = "pointer"); map.on("mouseleave", id, () => map.getCanvas().style.cursor = ""); });
+</script>
+</body>
+</html>
