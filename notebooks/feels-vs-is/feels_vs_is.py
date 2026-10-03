@@ -851,7 +851,7 @@ def _report(sub: gpd.GeoDataFrame, iu: pd.DataFrame, approaches: pd.DataFrame, c
     for _, r in blocks.iterrows():
         cen = w.loc[r.name].centroid if False else sub.loc[[r.name]].geometry.to_crs(METRIC_CRS).centroid.to_crs("EPSG:4326").iloc[0]
         worst_blocks.append({
-            "at": _cross(r["node_names"], own) if own else (r["node_names"] or ""), "name": r["name"], "gap": r["gap_class"],
+            "at": _cross(r["node_names"], own) if own else (r["node_names"] if isinstance(r["node_names"], str) else ""), "name": r["name"], "gap": r["gap_class"],
             "harm": float(r["harm_score"]), "lts": int(r["comfort_lts"]), "comfort": float(r["comfort_score"]),
             "crashes": int(r["crashes_5yr"]), "ksi": int(r["ksi_5yr"]), "node_crashes": int(r["node_crashes_5yr"]),
             "facility": r["facility"], "reasons": r["reasons"], "center": [round(cen.x, 5), round(cen.y, 5)],
@@ -898,6 +898,21 @@ def _report(sub: gpd.GeoDataFrame, iu: pd.DataFrame, approaches: pd.DataFrame, c
     }
 
 
+def json_safe(obj):
+    """NaN and numpy scalars are not JSON; fix them before dumping."""
+    if isinstance(obj, dict):
+        return {str(k): json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [json_safe(v) for v in obj]
+    if isinstance(obj, (np.integer,)):
+        return int(obj)
+    if isinstance(obj, (float, np.floating)):
+        return None if not np.isfinite(obj) else float(obj)
+    if obj is pd.NaT:
+        return None
+    return obj
+
+
 def street_reports(g: gpd.GeoDataFrame, fit: dict, approaches: pd.DataFrame, crashes: gpd.GeoDataFrame,
                    ward: pd.Series, min_km: float = 0.4, projects: pd.DataFrame | None = None,
                    seg_project: pd.DataFrame | None = None) -> dict:
@@ -923,7 +938,7 @@ def street_reports(g: gpd.GeoDataFrame, fit: dict, approaches: pd.DataFrame, cra
             continue
         sub.attrs = s.attrs
         out["wards"][str(int(float(wd)))] = _report(sub, iu, approaches, crashes, years, None, net_rate, **rp)
-    return out
+    return json_safe(out)
 
 
 # ----------------------------------------------------- Trend, and changes on the ground
