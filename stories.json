@@ -1,0 +1,42 @@
+[
+ {
+  "title": "14th Street Northwest: hidden danger",
+  "sub": "LTS 1, comfort 93, 9 injury crashes on one block since Oct 2021 (1 serious)",
+  "center": [
+   -77.03271,
+   38.9295
+  ],
+  "zoom": 16.5,
+  "layer": "gap"
+ },
+ {
+  "title": "9th Street Northwest & Rhode Island Avenue Northwest: worst intersection",
+  "sub": "7 injury crashes since Oct 2021 (1 serious), 0.5 expected for its design",
+  "center": [
+   -77.02394,
+   38.91154
+  ],
+  "zoom": 17,
+  "layer": "is"
+ },
+ {
+  "title": "21st & I St NW: two blocks from here",
+  "sub": "3 injury crashes within 120 m since Oct 2021 (1 serious). The July 2022 truck death is not recorded as a bicyclist fatality in this layer",
+  "center": [
+   -77.04665,
+   38.9007
+  ],
+  "zoom": 17,
+  "layer": "gap"
+ },
+ {
+  "title": "Connecticut Ave NW: the lanes that were dropped",
+  "sub": "7 injury crashes on these blocks since Oct 2021; mostly LTS 4. DDOT shelved its protected lanes in April 2024",
+  "center": [
+   -77.05647,
+   38.93206
+  ],
+  "zoom": 14.5,
+  "layer": "feels"
+ }
+]
