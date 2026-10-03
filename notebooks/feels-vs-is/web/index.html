@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Feels vs. Is: DC bike safety</title>
-<script src="config.js?v=20261003142346"></script>
+<script src="config.js?v=20261003142630"></script>
 <style>
   :root { --bg:#0f1115; --panel:rgba(17,19,24,.92); --ink:#e9e6df; --muted:#9a978f; --line:#2a2d35; --accent:#ffb347;
           --hd:#ff4d6d; --ff:#ff9f1c; --sq:#6c8cff; --calm:#3ddc97; --mid:#3a3f4b; --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; }
@@ -78,12 +78,12 @@
 </div>
 <div id="toast"></div>
 <script>
-const BUILD = "20261003142346";
+const BUILD = "20261003142630";
 const TOKEN = (window.FVI_CONFIG && window.FVI_CONFIG.mapboxToken) || "";
 const USE_MAPBOX = /^pk\./.test(TOKEN);
 const GAP = { hidden_danger:["#ff4d6d","Hidden danger","feels safe, people get hurt"], fix_first:["#ff9f1c","Fix first","bad on both counts"],
               scary_but_quiet:["#6c8cff","Scary but quiet","hostile, few crashes, riders avoid it"], calm:["#3ddc97","Calm","fine on both"], middle:["#3a3f4b","Middle",""] };
-const TREND = { rising:["#ff4d6d","Rising"], "rising?":["#ff8da1","Rising (weak)"], falling:["#3ddc97","Falling"], "falling?":["#8fe8c2","Falling (weak)"], flat:["#8a8f9c","Flat"], "too few":["#3a3f4b","Too few crashes"] };
+const TREND = { rising:["#ff4d6d","Rising"], "rising?":["#ff8da1","Rising (weak)"], falling:["#3ddc97","Falling"], "falling?":["#8fe8c2","Falling (weak)"], flat:["#8a8f9c","Flat"], "too few":["#6b7280","Too few crashes"] };
 const LAYERS = {
   feels:{title:"Feels: comfort (LTS-based)",prop:"comfort_score",ramp:["#b1152a","#e8632d","#f2c14e","#79b64a","#1f8a4c"],low:"stressful",high:"comfortable",
          blurb:"Comfort 0 to 100 from the street's design: facility, speed, lanes, volume, parking, pavement. Furth's Level of Traffic Stress with Montgomery County amendments."},
@@ -174,7 +174,7 @@ function renderHome(){
   if (reports){ const n=reports.network; $("citywide").innerHTML = `<div class="kpis"><div class="kpi"><b>${n.crashes}</b><span>injury crashes (${n.ksi} serious)</span></div><div class="kpi"><b>${badge(n.trend)}</b><span>${n.before_per_yr}/yr → ${n.after_per_yr}/yr</span></div><div class="kpi"><b>${n.changed_km} km</b><span>changed by DDOT since 2019</span></div></div>`; }
   setLayer(state.layer);
 }
-function badge(t){ const c=TREND[t]||TREND["too few"]; return `<span class="badge t-${t}" style="background:${c[0]}22;color:${c[0]}">${c[1]}</span>`; }
+function badge(t){ const c=TREND[t]||TREND["too few"]; const col = t==="too few" ? "#b3b0a8" : c[0]; return `<span class="badge t-${t}" style="background:${col}22;color:${col}">${c[1]}</span>`; }
 function stackBar(obj, colors, labelOf){
   const tot = Object.values(obj).reduce((a,b)=>a+b,0)||1; const keys=Object.keys(colors).filter(k=>obj[k]);
   return `<div class="bar">${keys.map(k=>`<i style="width:${obj[k]/tot*100}%;background:${colors[k]}"></i>`).join("")}</div><div class="barlab">${keys.map(k=>`<span><b style="color:${colors[k]}">■</b> ${labelOf(k)} ${(obj[k]/tot*100).toFixed(0)}%</span>`).join("")}</div>`;
@@ -289,7 +289,7 @@ async function init(){
   hoverPop = new GL.Popup({closeButton:false,closeOnClick:false,className:"hover-tip",offset:10});
   map.on("mousemove","seg",e=>{ const p=e.features[0].properties; map.getCanvas().style.cursor="pointer"; hoverPop.setLngLat(e.lngLat).setHTML(`<b>${esc(p.name)}</b> · ${GAP[p.gap_class][1]} · harm ${p.harm_score} · LTS ${p.comfort_lts}${p.changed?` · changed ${p.changed}`:""}`).addTo(map); });
   map.on("mouseleave","seg",()=>{ map.getCanvas().style.cursor=""; hoverPop.remove(); });
-  map.on("click","seg",e=>{ const p=e.features[0].properties; const col=GAP[p.gap_class][0]; const tc=TREND[p.trend]||TREND["too few"];
+  map.on("click","seg",e=>{ const p=e.features[0].properties; const col=GAP[p.gap_class][0]; const tc0=TREND[p.trend]||TREND["too few"]; const tc=[p.trend==="too few"?"#b3b0a8":tc0[0], tc0[1]];
     const html=`<div class="pop"><h3>${esc(p.name)}</h3><span class="cls" style="background:${col}22;color:${col};border:1px solid ${col}66">${GAP[p.gap_class][1]}</span><span class="cls" style="background:${tc[0]}22;color:${tc[0]}">${tc[1]}: ${p.crashes_before} before, ${p.crashes_after} since 2025</span>
       <div class="row"><span class="k">Feels (comfort)</span><span>${p.comfort_score} · LTS ${p.comfort_lts}${p.kid_ok?" · kid ok":""}</span></div>
       <div class="row"><span class="k">Is (harm)</span><span>${p.harm_score} · ${p.harm_driver}</span></div>
