@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Feels vs. Is: DC bike safety</title>
-<script src="config.js?v=20261003141114"></script>
+<script src="config.js?v=20261003141926"></script>
 <style>
   :root { --bg:#0f1115; --panel:rgba(17,19,24,.92); --ink:#e9e6df; --muted:#9a978f; --line:#2a2d35; --accent:#ffb347;
           --hd:#ff4d6d; --ff:#ff9f1c; --sq:#6c8cff; --calm:#3ddc97; --mid:#3a3f4b; --font:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; }
@@ -49,14 +49,15 @@
   .chg{border-left:3px solid var(--accent);padding:6px 10px;margin:5px 0;background:#171a21;border-radius:0 8px 8px 0;font-size:12px;} .chg small{color:var(--muted);display:block;line-height:1.35;}
   .chg .ba{margin-top:3px;font-size:11.5px;} .ba b{font-weight:600;}
   .btns{display:flex;gap:6px;margin-top:10px;} .btns button{flex:1;border:1px solid var(--line);background:#171a21;color:var(--ink);border-radius:8px;padding:7px;font:600 12px var(--font);cursor:pointer;} .btns button:hover{border-color:var(--accent);}
-  .maplibregl-popup-content,.mapboxgl-popup-content{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;font-family:var(--font);font-size:12.5px;padding:12px 14px;max-width:300px;box-shadow:0 8px 30px rgba(0,0,0,.5);}
-  .maplibregl-popup-tip,.mapboxgl-popup-tip{border-top-color:#1a1d24!important;border-bottom-color:#1a1d24!important;}
-  .maplibregl-popup-close-button,.mapboxgl-popup-close-button{color:var(--muted);font-size:16px;}
+  #map .maplibregl-popup-content,#map .mapboxgl-popup-content{background:#14171d!important;color:var(--ink)!important;border:1px solid var(--line);border-radius:12px;font-family:var(--font);font-size:13px;padding:12px 14px;max-width:320px;box-shadow:0 10px 36px rgba(0,0,0,.6);}
+  #map .maplibregl-popup-tip,#map .mapboxgl-popup-tip{border-top-color:#14171d!important;border-bottom-color:#14171d!important;border-left-color:#14171d!important;border-right-color:#14171d!important;}
+  #map .maplibregl-popup-close-button,#map .mapboxgl-popup-close-button{color:var(--muted)!important;font-size:18px;right:4px;top:2px;}
+  #map .mapboxgl-popup-anchor-top .mapboxgl-popup-tip{border-bottom-color:#14171d!important;}
   .pop h3{margin:0 0 6px;font-size:14px;} .pop .row{display:flex;justify-content:space-between;gap:10px;margin:3px 0;} .pop .k{color:var(--muted);}
   .pop .cls{display:inline-block;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:600;margin:0 4px 6px 0;}
   .pop .reasons{margin-top:6px;font-size:12px;line-height:1.35;border-top:1px solid var(--line);padding-top:6px;}
   .pop button{margin-top:8px;width:100%;border:1px solid var(--accent);background:transparent;color:var(--accent);border-radius:7px;padding:6px;font:600 12px var(--font);cursor:pointer;}
-  .hover-tip{pointer-events:none;} .hover-tip .maplibregl-popup-content,.hover-tip .mapboxgl-popup-content{padding:6px 9px;font-size:12px;}
+  .hover-tip{pointer-events:none;} #map .hover-tip .maplibregl-popup-content,#map .hover-tip .mapboxgl-popup-content{padding:6px 9px!important;font-size:12px;}
   #toast{position:absolute;z-index:3;bottom:16px;left:50%;transform:translateX(-50%);background:var(--panel);border:1px solid var(--line);padding:8px 14px;border-radius:9px;font-size:12.5px;display:none;}
   @media (max-width:700px){#side{left:8px;right:8px;width:auto;top:auto;bottom:8px;max-height:58vh;}}
 </style>
@@ -77,7 +78,7 @@
 </div>
 <div id="toast"></div>
 <script>
-const BUILD = "20261003141114";
+const BUILD = "20261003141926";
 const TOKEN = (window.FVI_CONFIG && window.FVI_CONFIG.mapboxToken) || "";
 const USE_MAPBOX = /^pk\./.test(TOKEN);
 const GAP = { hidden_danger:["#ff4d6d","Hidden danger","feels safe, people get hurt"], fix_first:["#ff9f1c","Fix first","bad on both counts"],
@@ -95,6 +96,7 @@ let map, GL, segData, reports, hoverPop, state = { layer:"gap", street:null, war
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt1 = v => v == null ? "n/a" : (+v).toFixed(1);
+const streetView = ll => `https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=${ll.lat.toFixed(6)},${ll.lng.toFixed(6)}`;
 function toast(msg){ const t=$("toast"); t.textContent=msg; t.style.display="block"; setTimeout(()=>t.style.display="none", 2600); }
 function loadScript(src){ return new Promise((res,rej)=>{ const s=document.createElement("script"); s.src=src; s.onload=res; s.onerror=rej; document.head.appendChild(s); }); }
 function loadCss(href){ const l=document.createElement("link"); l.rel="stylesheet"; l.href=href; document.head.appendChild(l); }
@@ -117,7 +119,7 @@ function scopeFilter(){
 function applyFilters(){
   const f = ["all"]; const a=showFilter(), b=scopeFilter(); if (a) f.push(a); if (b) f.push(b);
   const filt = f.length>1 ? f : null;
-  map.setFilter("seg", filt); map.setFilter("seg-case", filt);
+  map.setFilter("seg", filt); map.setFilter("seg-case", filt); map.setFilter("seg-glow", filt);
   // context: everything else dimmed
   map.setLayoutProperty("seg-dim","visibility", filt ? "visible" : "none");
   map.setLayoutProperty("seg-changed","visibility", (state.show==="changed" || b) ? "visible" : "none");
@@ -127,9 +129,10 @@ function applyFilters(){
 function setLayer(key){
   state.layer = key; const L=LAYERS[key];
   document.querySelectorAll(".tabs button").forEach(b=>b.classList.toggle("on", b.dataset.layer===key));
-  if (key==="gap"){ map.setPaintProperty("seg","line-color",matchExpr("gap_class",GAP,"#3a3f4b")); map.setPaintProperty("seg","line-opacity",["case",["==",["get","gap_class"],"middle"],0.35,1]); }
-  else if (key==="trend"){ map.setPaintProperty("seg","line-color",matchExpr("trend",TREND,"#3a3f4b")); map.setPaintProperty("seg","line-opacity",["case",["==",["get","trend"],"too few"],0.3,1]); }
-  else { map.setPaintProperty("seg","line-color",rampExpr(L.prop,L.ramp)); map.setPaintProperty("seg","line-opacity",0.95); }
+  const glow = c => map.setPaintProperty("seg-glow","line-color",c);
+  if (key==="gap"){ map.setPaintProperty("seg","line-color",matchExpr("gap_class",GAP,"#3a3f4b")); glow(matchExpr("gap_class",GAP,"#3a3f4b")); map.setPaintProperty("seg","line-opacity",["case",["==",["get","gap_class"],"middle"],0.35,1]); }
+  else if (key==="trend"){ map.setPaintProperty("seg","line-color",matchExpr("trend",TREND,"#3a3f4b")); glow(matchExpr("trend",TREND,"#3a3f4b")); map.setPaintProperty("seg","line-opacity",["case",["==",["get","trend"],"too few"],0.3,1]); }
+  else { map.setPaintProperty("seg","line-color",rampExpr(L.prop,L.ramp)); glow(rampExpr(L.prop,L.ramp)); map.setPaintProperty("seg","line-opacity",0.95); }
   const lg=$("legend"); if (!lg) return;
   $("blurb").textContent = L.blurb;
   if (key==="gap") lg.innerHTML = `<b>${L.title}</b>` + Object.values(GAP).map(([c,t,d])=>`<div class="cat"><span class="sw" style="background:${c}"></span><span><b>${t}</b>${d?": "+d:""}</span></div>`).join("");
@@ -146,6 +149,9 @@ function renderHome(){
     <div class="tabs">${Object.keys(LAYERS).map(k=>`<button data-layer="${k}">${k[0].toUpperCase()+k.slice(1)}</button>`).join("")}</div>
     <div class="blurb" id="blurb"></div><div class="legend" id="legend"></div>
     <label class="toggle"><input type="checkbox" id="dots" checked> intersection crashes (size = crashes, white ring = serious)</label>
+    <label class="toggle"><input type="checkbox" class="lm" data-layers="trail-line,trail-label" checked> <span class="sw" style="background:#5ad1c3"></span> trails (DDOT and NPS)</label>
+    <label class="toggle"><input type="checkbox" class="lm" data-layers="lm-bikeshare"> <span class="sw" style="background:#4cc9f0"></span> Capital Bikeshare stations (size = docks)</label>
+    <label class="toggle"><input type="checkbox" class="lm" data-layers="lm-shop,lm-shop-label"> <span class="sw" style="background:#ffd166"></span> bike shops (OSM)</label>
     <h4>Stories</h4><div class="stories" id="stories"></div>
     <h4>Citywide</h4><div id="citywide"></div>
     <details><summary>How to read this map</summary><ul>
@@ -163,6 +169,7 @@ function renderHome(){
   document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>setLayer(b.dataset.layer));
   $("dots").checked = map.getLayoutProperty("int-dot","visibility")!=="none";
   $("dots").onchange = e=>["int-ring","int-dot"].forEach(id=>map.setLayoutProperty(id,"visibility",e.target.checked?"visible":"none"));
+  document.querySelectorAll("input.lm").forEach(cb=>{ const ids=cb.dataset.layers.split(","); cb.checked = map.getLayoutProperty(ids[0],"visibility")!=="none"; cb.onchange=()=>ids.forEach(id=>map.setLayoutProperty(id,"visibility",cb.checked?"visible":"none")); });
   const sEl=$("stories"); (window.STORIES||[]).forEach(s=>{ const b=document.createElement("button"); b.innerHTML=`${esc(s.title)}<small>${esc(s.sub)}</small>`; b.onclick=()=>{ setLayer(s.layer||"gap"); map.flyTo({center:s.center,zoom:s.zoom||16,pitch:45,bearing:-20,speed:0.9}); }; sEl.appendChild(b); });
   if (reports){ const n=reports.network; $("citywide").innerHTML = `<div class="kpis"><div class="kpi"><b>${n.crashes}</b><span>injury crashes (${n.ksi} serious)</span></div><div class="kpi"><b>${badge(n.trend)}</b><span>${n.before_per_yr}/yr → ${n.after_per_yr}/yr</span></div><div class="kpi"><b>${n.changed_km} km</b><span>changed by DDOT since 2019</span></div></div>`; }
   setLayer(state.layer);
@@ -214,8 +221,8 @@ function renderReport(kind, key){
 }
 function pad(){ return window.innerWidth<=700 ? {left:30,top:30,right:30,bottom:Math.round(window.innerHeight*0.6)} : {left:410,top:40,right:40,bottom:40}; }
 function boundsOf(filterFn){ let b=null; for (const f of segData.features){ if (!filterFn(f.properties)) continue; const cs=f.geometry.type==="LineString"?f.geometry.coordinates:f.geometry.coordinates.flat(); for (const c of cs){ if (!b) b=[[c[0],c[1]],[c[0],c[1]]]; else { b[0][0]=Math.min(b[0][0],c[0]); b[0][1]=Math.min(b[0][1],c[1]); b[1][0]=Math.max(b[1][0],c[0]); b[1][1]=Math.max(b[1][1],c[1]); } } } return b; }
-function openStreet(key, fly=true){ state.street=key; state.ward=null; $("ward").value=""; $("q").value=key; applyFilters(); renderReport("street",key); if (fly){ const b=boundsOf(p=>p.street_key===key); if (b) map.fitBounds(b,{padding:pad(),pitch:0,bearing:0,maxZoom:15.5}); } writeHash(); }
-function openWard(w, fly=true){ state.ward=w; state.street=null; $("q").value=""; $("ward").value=w; applyFilters(); renderReport("ward",w); if (fly){ const b=boundsOf(p=>p.ward===w); if (b) map.fitBounds(b,{padding:pad(),pitch:0,bearing:0}); } writeHash(); }
+function openStreet(key, fly=true){ state.street=key; state.ward=null; $("ward").value=""; $("q").value=key; applyFilters(); renderReport("street",key); if (fly){ const b=boundsOf(p=>p.street_key===key); if (b) map.fitBounds(b,{padding:pad(),pitch:45,bearing:-12,maxZoom:15.5}); } writeHash(); }
+function openWard(w, fly=true){ state.ward=w; state.street=null; $("q").value=""; $("ward").value=w; applyFilters(); renderReport("ward",w); if (fly){ const b=boundsOf(p=>p.ward===w); if (b) map.fitBounds(b,{padding:pad(),pitch:45,bearing:-12}); } writeHash(); }
 function clearScope(){ state.street=null; state.ward=null; $("q").value=""; $("ward").value=""; applyFilters(); writeHash(); }
 
 /* ---------- search ---------- */
@@ -238,8 +245,10 @@ async function init(){
   if (USE_MAPBOX){ loadCss("https://api.mapbox.com/mapbox-gl-js/v3.32.0/mapbox-gl.css"); await loadScript("https://api.mapbox.com/mapbox-gl-js/v3.32.0/mapbox-gl.js"); GL=window.mapboxgl; GL.accessToken=TOKEN; }
   else { loadCss("https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css"); await loadScript("https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"); GL=window.maplibregl; }
   const h = readHash(); state.layer=h.layer; state.show=h.show; $("show").value=state.show;
-  map = new GL.Map({ container:"map", style: USE_MAPBOX ? "mapbox://styles/mapbox/dark-v11" : "https://tiles.openfreemap.org/styles/dark",
-                     center:[-77.025,38.905], zoom:12.2, attributionControl: USE_MAPBOX ? undefined : {compact:true} });
+  const opts = { container:"map", center:[-77.025,38.905], zoom:12.4, pitch:45, bearing:-12, antialias:true };
+  if (USE_MAPBOX){ Object.assign(opts, { style:"mapbox://styles/mapbox/standard", config:{ basemap:{ lightPreset:"night", showPointOfInterestLabels:false, showTransitLabels:false, show3dObjects:true, theme:"monochrome" } } }); }
+  else { Object.assign(opts, { style:"https://tiles.openfreemap.org/styles/dark", attributionControl:{compact:true} }); }
+  map = new GL.Map(opts);
   map.addControl(new GL.NavigationControl({visualizePitch:true}),"top-right");
   map.addControl(new GL.FullscreenControl(),"top-right");
   map.addControl(new GL.GeolocateControl({positionOptions:{enableHighAccuracy:true},trackUserLocation:false}),"top-right");
@@ -247,16 +256,33 @@ async function init(){
   const [seg, ints, stories, rep] = await Promise.all([fetch("segments.geojson?v="+BUILD).then(r=>r.json()), fetch("intersections.geojson?v="+BUILD).then(r=>r.json()), fetch("stories.json?v="+BUILD).then(r=>r.json()).catch(()=>[]), fetch("reports.json?v="+BUILD).then(r=>r.json())]);
   segData=seg; reports=rep; window.STORIES=stories;
   await mapReady;
-  const firstSymbol = (map.getStyle().layers.find(l=>l.type==="symbol")||{}).id;
+  const firstSymbol = USE_MAPBOX ? undefined : (map.getStyle().layers.find(l=>l.type==="symbol")||{}).id;
+  const add = (layer, slot) => { if (USE_MAPBOX) layer.slot = slot || "middle"; map.addLayer(layer, USE_MAPBOX ? undefined : firstSymbol); };
+  if (!USE_MAPBOX && map.getSource("openmaptiles")) {
+    try { add({id:"bld-3d",type:"fill-extrusion",source:"openmaptiles","source-layer":"building",minzoom:14,paint:{"fill-extrusion-color":"#1e2129","fill-extrusion-height":["coalesce",["get","render_height"],12],"fill-extrusion-base":["coalesce",["get","render_min_height"],0],"fill-extrusion-opacity":0.85}}); } catch(e){}
+  }
   map.addSource("segments",{type:"geojson",data:seg}); map.addSource("intersections",{type:"geojson",data:ints});
+  map.addSource("trails",{type:"geojson",data:"trails.geojson?v="+BUILD}); map.addSource("landmarks",{type:"geojson",data:"landmarks.geojson?v="+BUILD});
   const width = ["interpolate",["linear"],["zoom"],11,0.9,14,2.8,17,7];
-  map.addLayer({id:"seg-dim",type:"line",source:"segments",layout:{visibility:"none","line-cap":"round","line-join":"round"},paint:{"line-color":"#3a3f4b","line-opacity":0.35,"line-width":width}}, firstSymbol);
-  map.addLayer({id:"seg-case",type:"line",source:"segments",layout:{"line-cap":"round","line-join":"round"},paint:{"line-color":"#05060a","line-opacity":0.9,"line-width":["interpolate",["linear"],["zoom"],11,1.8,14,4.8,17,11]}}, firstSymbol);
-  map.addLayer({id:"seg",type:"line",source:"segments",layout:{"line-cap":"round","line-join":"round"},paint:{"line-color":"#888","line-opacity":0.95,"line-width":width}}, firstSymbol);
-  map.addLayer({id:"seg-changed",type:"line",source:"segments",filter:["has","changed"],layout:{"line-cap":"butt",visibility:"none"},paint:{"line-color":"#ffffff","line-opacity":0.8,"line-width":["interpolate",["linear"],["zoom"],12,0.6,16,1.4],"line-dasharray":[1,2.5],"line-offset":["interpolate",["linear"],["zoom"],12,2,16,6]}}, firstSymbol);
+  add({id:"seg-dim",type:"line",source:"segments",layout:{visibility:"none","line-cap":"round","line-join":"round"},paint:{"line-color":"#3a3f4b","line-opacity":0.35,"line-width":width}});
+  add({id:"seg-glow",type:"line",source:"segments",layout:{"line-cap":"round","line-join":"round"},paint:{"line-color":"#888","line-opacity":0.28,"line-blur":4,"line-width":["interpolate",["linear"],["zoom"],11,3,14,8,17,18]}});
+  add({id:"seg-case",type:"line",source:"segments",layout:{"line-cap":"round","line-join":"round"},paint:{"line-color":"#05060a","line-opacity":0.9,"line-width":["interpolate",["linear"],["zoom"],11,1.8,14,4.8,17,11]}});
+  add({id:"seg",type:"line",source:"segments",layout:{"line-cap":"round","line-join":"round"},paint:{"line-color":"#888","line-opacity":0.95,"line-width":width}});
+  add({id:"seg-changed",type:"line",source:"segments",filter:["has","changed"],layout:{"line-cap":"butt",visibility:"none"},paint:{"line-color":"#ffffff","line-opacity":0.8,"line-width":["interpolate",["linear"],["zoom"],12,0.6,16,1.4],"line-dasharray":[1,2.5],"line-offset":["interpolate",["linear"],["zoom"],12,2,16,6]}});
+  const font = USE_MAPBOX ? ["DIN Pro Medium","Arial Unicode MS Regular"] : ["Noto Sans Regular"];
+  add({id:"trail-line",type:"line",source:"trails",layout:{"line-cap":"round","line-join":"round"},paint:{"line-color":"#5ad1c3","line-opacity":0.55,"line-width":["interpolate",["linear"],["zoom"],11,1.2,15,3],"line-dasharray":[2,1.5]}});
+  add({id:"trail-label",type:"symbol",source:"trails",minzoom:12.5,filter:["!=",["get","name"],""],layout:{"symbol-placement":"line","text-field":["get","name"],"text-font":font,"text-size":11,"text-letter-spacing":0.05,"symbol-spacing":400},paint:{"text-color":"#9fe7dc","text-halo-color":"#0b0d12","text-halo-width":1.4}}, "top");
+  add({id:"lm-bikeshare",type:"circle",source:"landmarks",minzoom:12.5,filter:["==",["get","kind"],"bikeshare"],paint:{"circle-radius":["interpolate",["linear"],["zoom"],12.5,2,16,["+",3,["/",["get","capacity"],8]]],"circle-color":"#4cc9f0","circle-opacity":0.85,"circle-stroke-color":"#0b0d12","circle-stroke-width":1}}, "top");
+  add({id:"lm-shop",type:"circle",source:"landmarks",minzoom:12.5,filter:["==",["get","kind"],"shop"],paint:{"circle-radius":["interpolate",["linear"],["zoom"],12.5,3,16,6],"circle-color":"#ffd166","circle-stroke-color":"#0b0d12","circle-stroke-width":1.2}}, "top");
+  add({id:"lm-shop-label",type:"symbol",source:"landmarks",minzoom:14.5,filter:["==",["get","kind"],"shop"],layout:{"text-field":["get","name"],"text-font":font,"text-size":11,"text-offset":[0,1.1],"text-anchor":"top"},paint:{"text-color":"#ffd166","text-halo-color":"#0b0d12","text-halo-width":1.4}}, "top");
   const rad = ["interpolate",["linear"],["zoom"],11,["*",0.9,["sqrt",["get","crashes"]]],15,["*",3.4,["sqrt",["get","crashes"]]]];
-  map.addLayer({id:"int-ring",type:"circle",source:"intersections",paint:{"circle-radius":rad,"circle-color":"rgba(0,0,0,0)","circle-stroke-color":"#fff","circle-stroke-width":["case",[">",["get","ksi"],0],1.6,0.6],"circle-stroke-opacity":["case",[">",["get","ksi"],0],0.95,0.35]}});
-  map.addLayer({id:"int-dot",type:"circle",source:"intersections",paint:{"circle-radius":rad,"circle-color":"#ff4d6d","circle-opacity":0.55,"circle-blur":0.25}});
+  add({id:"int-ring",type:"circle",source:"intersections",paint:{"circle-radius":rad,"circle-color":"rgba(0,0,0,0)","circle-stroke-color":"#fff","circle-stroke-width":["case",[">",["get","ksi"],0],1.6,0.6],"circle-stroke-opacity":["case",[">",["get","ksi"],0],0.95,0.35]}}, "top");
+  add({id:"int-dot",type:"circle",source:"intersections",paint:{"circle-radius":rad,"circle-color":"#ff4d6d","circle-opacity":0.55,"circle-blur":0.25}}, "top");
+  ["lm-bikeshare","lm-shop","lm-shop-label","trail-line","trail-label"].forEach(id=>map.setLayoutProperty(id,"visibility", id.startsWith("trail") ? "visible" : "none"));
+  for (const [id,p] of Object.entries({"lm-bikeshare":"Capital Bikeshare station","lm-shop":"Bike shop"})) {
+    map.on("click",id,e=>{ const q=e.features[0].properties; new GL.Popup().setLngLat(e.lngLat).setHTML(`<div class="pop"><h3>${esc(q.name)}</h3><div class="row"><span class="k">${p}</span><span>${q.capacity?q.capacity+" docks":""}</span></div><a class="sv" target="_blank" rel="noopener" href="${streetView(e.lngLat)}">Open Street View here ↗</a></div>`).addTo(map); });
+    map.on("mouseenter",id,()=>map.getCanvas().style.cursor="pointer"); map.on("mouseleave",id,()=>map.getCanvas().style.cursor="");
+  }
   renderHome(); setupSearch();
   hoverPop = new GL.Popup({closeButton:false,closeOnClick:false,className:"hover-tip",offset:10});
   map.on("mousemove","seg",e=>{ const p=e.features[0].properties; map.getCanvas().style.cursor="pointer"; hoverPop.setLngLat(e.lngLat).setHTML(`<b>${esc(p.name)}</b> · ${GAP[p.gap_class][1]} · harm ${p.harm_score} · LTS ${p.comfort_lts}${p.changed?` · changed ${p.changed}`:""}`).addTo(map); });
@@ -270,10 +296,10 @@ async function init(){
       <div class="row"><span class="k">Death risk if struck</span><span>${Math.round(p.death_risk_if_struck*100)}% at ${p.speed_mph} mph</span></div>
       ${p.changed?`<div class="row"><span class="k">DDOT change</span><span>${esc(p.changed_what)} · ${p.changed}</span></div>`:""}${p.planned?`<div class="row"><span class="k">Planned</span><span>${esc(p.planned)}</span></div>`:""}
       <div class="row"><span class="k">Confidence</span><span>${p.confidence}</span></div>
-      <div class="reasons">${esc(p.reasons||"")}</div>${reports.streets[p.street_key]?`<button id="rep-btn">Street report: ${esc(p.street_key)} →</button>`:""}</div>`;
+      <div class="reasons">${esc(p.reasons||"")}</div><a class="sv" target="_blank" rel="noopener" href="${streetView(e.lngLat)}">Open Street View here ↗</a>${reports.streets[p.street_key]?`<button id="rep-btn">Street report: ${esc(p.street_key)} →</button>`:""}</div>`;
     const pop=new GL.Popup({closeButton:true}).setLngLat(e.lngLat).setHTML(html).addTo(map);
     const btn=document.getElementById("rep-btn"); if (btn) btn.onclick=()=>{ pop.remove(); openStreet(p.street_key); }; });
-  map.on("click","int-dot",e=>{ const p=e.features[0].properties; new GL.Popup().setLngLat(e.lngLat).setHTML(`<div class="pop"><h3>${esc(p.names||"intersection")}</h3><div class="row"><span class="k">Injury crashes since Oct 2021</span><span>${p.crashes} (${p.ksi} serious)</span></div><div class="row"><span class="k">Expected for this design</span><span>${(+p.mu).toFixed(1)}</span></div><div class="row"><span class="k">EB estimate</span><span>${(+p.eb).toFixed(1)}</span></div><div class="row"><span class="k">Approaches</span><span>${p.n_approaches}</span></div></div>`).addTo(map); });
+  map.on("click","int-dot",e=>{ const p=e.features[0].properties; new GL.Popup().setLngLat(e.lngLat).setHTML(`<div class="pop"><h3>${esc(p.names||"intersection")}</h3><div class="row"><span class="k">Injury crashes since Oct 2021</span><span>${p.crashes} (${p.ksi} serious)</span></div><div class="row"><span class="k">Expected for this design</span><span>${(+p.mu).toFixed(1)}</span></div><div class="row"><span class="k">EB estimate</span><span>${(+p.eb).toFixed(1)}</span></div><div class="row"><span class="k">Approaches</span><span>${p.n_approaches}</span></div><a class="sv" target="_blank" rel="noopener" href="${streetView(e.lngLat)}">Open Street View here ↗</a></div>`).addTo(map); });
   map.on("mouseenter","int-dot",()=>map.getCanvas().style.cursor="pointer"); map.on("mouseleave","int-dot",()=>map.getCanvas().style.cursor="");
   if (h.street && reports.streets[h.street]) openStreet(h.street); else if (h.ward && reports.wards[h.ward]) openWard(h.ward); else applyFilters();
   $("tag").textContent = USE_MAPBOX ? "Mapbox GL JS · how streets feel vs. what happens on them" : "How streets feel vs. what happens on them. 28,978 segments, 2,297 injury crashes since Oct 2021.";

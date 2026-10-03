@@ -1080,3 +1080,70 @@ def project_before_after(units: pd.Series, int_ids: pd.Series, project, crashes:
     b, a = int((c["date"] < t).sum()), int((c["date"] >= t).sum())
     return {"before": b, "after": a, "years_before": round(tb, 1), "years_after": round(ta, 1),
             "before_per_yr": round(b / tb, 2) if tb >= 0.5 else None, "after_per_yr": round(a / ta, 2) if ta >= 0.5 else None}
+
+
+# ------------------------------------------------------------- Landmarks for the map
+GBFS_STATIONS = "https://gbfs.lyft.com/gbfs/2.3/dca-cabi/en/station_information.json"
+OVERPASS_URLS = ["https://overpass.kumi.systems/api/interpreter", "https://lz4.overpass-api.de/api/interpreter", "https://overpass-api.de/api/interpreter"]
+TRAILS_URL = "https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/Transportation_Bikes_Trails_WebMercator/MapServer/4/query"
+NPS_TRAILS_URL = "https://maps2.dcgis.dc.gov/dcgis/rest/services/DCGIS_DATA/Transportation_Bikes_Trails_WebMercator/MapServer/75/query"
+DC_BBOX = (38.79, -77.12, 39.0, -76.90)  # south, west, north, east
+
+
+def landmarks(out_dir: pathlib.Path = CACHE / "web") -> dict:
+    """Capital Bikeshare stations, bike shops (OSM) and trails (DC GIS) as GeoJSON for the map."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    counts = {}
+    feats = []
+    try:
+        st = requests.get(GBFS_STATIONS, timeout=30).json()["data"]["stations"]
+        s, w, n, e = DC_BBOX
+        for x in st:
+            if s <= x["lat"] <= n and w <= x["lon"] <= e:
+                feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(x["lon"], 5), round(x["lat"], 5)]},
+                              "properties": {"kind": "bikeshare", "name": x.get("name", ""), "capacity": int(x.get("capacity", 0))}})
+        counts["bikeshare"] = len(feats)
+    except Exception as exc:  # noqa: BLE001
+        counts["bikeshare_error"] = str(exc)[:80]
+    try:
+        s, w, n, e = DC_BBOX
+        q = f'[out:json][timeout:60];(node["shop"="bicycle"]({s},{w},{n},{e});way["shop"="bicycle"]({s},{w},{n},{e}););out center;'
+        r = None
+        for url in OVERPASS_URLS:
+            try:
+                r = requests.post(url, data={"data": q}, timeout=90, headers={"User-Agent": "feels-vs-is/1.0 (ridescore dc hackathon)"}).json()
+                break
+            except Exception:  # noqa: BLE001
+                continue
+        if r is None:
+            raise RuntimeError("all overpass mirrors failed")
+        k = 0
+        for el in r.get("elements", []):
+            lat, lon = (el.get("lat"), el.get("lon")) if el["type"] == "node" else (el.get("center", {}).get("lat"), el.get("center", {}).get("lon"))
+            if lat is None:
+                continue
+            feats.append({"type": "Feature", "geometry": {"type": "Point", "coordinates": [round(lon, 5), round(lat, 5)]},
+                          "properties": {"kind": "shop", "name": el.get("tags", {}).get("name", "Bike shop")}})
+            k += 1
+        counts["shops"] = k
+    except Exception as exc:  # noqa: BLE001
+        counts["shops_error"] = str(exc)[:80]
+    json.dump({"type": "FeatureCollection", "features": feats}, open(out_dir / "landmarks.geojson", "w"), separators=(",", ":"))
+
+    trails = []
+    for url, src, name_field in [(TRAILS_URL, "dc", "NAME"), (NPS_TRAILS_URL, "nps", "TRLNAME")]:
+        try:
+            r = requests.get(url, params={"where": "1=1", "outFields": "*", "outSR": 4326, "f": "geojson", "resultRecordCount": 2000}, timeout=90).json()
+            for f in r.get("features", []):
+                p = f.get("properties", {}) or {}
+                nm = next((p[k] for k in (name_field, "NAME", "TRAIL_NAME", "LOCAL_NAME", "FMSS_NAME", "SEGMENT_NA", "UNIT_NAME") if p.get(k)), "")
+                if not f.get("geometry"):
+                    continue
+                g = f["geometry"]
+                g["coordinates"] = json.loads(json.dumps(g["coordinates"]), parse_float=lambda v: round(float(v), 5))
+                trails.append({"type": "Feature", "geometry": g, "properties": {"name": str(nm).title(), "src": src}})
+            counts["trails_" + src] = len(r.get("features", []))
+        except Exception as exc:  # noqa: BLE001
+            counts["trails_" + src + "_error"] = str(exc)[:80]
+    json.dump({"type": "FeatureCollection", "features": trails}, open(out_dir / "trails.geojson", "w"), separators=(",", ":"))
+    return counts
