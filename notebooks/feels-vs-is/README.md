@@ -4,6 +4,8 @@ LTS tells you how a street feels. Crashes tell you what happens on it. This mode
 
 Map: [bryceob13.github.io/ridescoredc-models](https://bryceob13.github.io/ridescoredc-models/). Notebook: `feels_vs_is.ipynb`. Logic: `feels_vs_is.py`. Design notes: `SPEC.md`.
 
+On the map, search any street or pick a ward for a report: crash trend since 2025, worst blocks and intersections, and what DDOT has changed or planned there. The URL carries the view, so a report can be linked.
+
 ## What it produces
 
 `feels_vs_is_results.parquet`, one row per snapshot segment (28,978 rows), keyed by `osm_u`, `osm_v`, `osm_key` and `snapshot_date = "2026-09-29"`.
@@ -73,6 +75,14 @@ Train on crashes before 2025 (1,192), test on 2025 to Oct 2026 (1,105 injury cra
 
 Hidden danger, one row per block, by harm: the 9th St NW two-way track at Rhode Island Ave (7 injury crashes on one block, 7 more at the intersection), the 14th St NW protected lane north of Columbia Heights (9 crashes, 1 serious), the K St NW track downtown, 14th and U St NW, the 11th St NW track at H St, Irving St NW at 14th, and the 15th St NW track (6 crashes, 2 serious). 35 km of the 104 km of hidden danger is separated track and 4 km is protected lane: the facilities a stress map rates safest.
 
+## Trend and changes on the ground
+
+**Trend.** Each street, ward and block compares its injury crash rate since Jan 2025 with Oct 2021 to Dec 2024. Recorded bicyclist injuries rose about 1.7 times citywide over that split, so the label is relative to the city: `rising` means at least 1.5 times the citywide change with two or more recent crashes, `falling` at most 0.67 times with two or more earlier crashes, tested with a binomial test on the split (p < 0.2 for the firm label, otherwise marked weak). Fewer than three crashes in total is `too few`. By block, 28,119 segments are too few, 243 rising (76 firm), 362 falling (36 firm), 142 flat.
+
+**Changes.** DDOT's ProTrack project lines (`Transportation_Plans_Projects_Study_WebMercator/MapServer/138`) matched to segments by route ID and measure, else by lying within 15 m of the project line. Bike lane, bike marking, speed management, safety, signal and streetscape work types since 2019; routine re-striping is left out. 340 projects touch 4,192 segments (205 km); 1,231 of the 3,216 hidden-danger and fix-first segments have a completed project on them and 297 have one planned or in progress. Each report lists the projects with the injury crash rate before and after completion on the matched blocks and intersections. There is no control group and no exposure, so a rising rate after a new lane can mean more riders. Read it as a check, not a verdict.
+
+**Map.** `web/index.html` renders with Mapbox GL JS when a public token is set in `web/config.js`, otherwise MapLibre GL with OpenFreeMap's dark style. The page is published from the fork's `gh-pages` branch together with the GeoJSON and `reports.json`.
+
 ## What it cannot tell you
 
 - **No bicycle exposure.** Low harm can mean few riders. `scary_but_quiet` exists to say so; it is 1.4 percent of the network and almost all arterials and parkways at 35 mph or more.
@@ -81,6 +91,7 @@ Hidden danger, one row per block, by harm: the 9th St NW two-way track at Rhode 
 - **Death risk is a pedestrian curve** (Tefft 2011), evaluated at the posted limit rather than impact speed.
 - **Crash reporting gaps.** The layer holds what police recorded as a bicyclist injury. The July 2022 truck death at 21st and I St NW does not appear as a bicyclist fatality in it. About 3 percent of crashes cannot be placed on the network.
 - **No signal timing, turn lanes, lighting or construction data.** Intersection expectations come from geometry alone.
+- **Trend labels on single blocks rest on a handful of crashes.** Use the street and ward trends; block trends are a pointer, not a finding.
 - **Harm at intersections is sparse.** 657 of 7,672 intersections have any crash, so a single crash puts an intersection in the top 8 percent. EB shrinks it, but one event is still one event.
 
 ## Next steps

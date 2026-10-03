@@ -77,7 +77,7 @@
 </div>
 <div id="toast"></div>
 <script>
-const BUILD = "202610031356";
+const BUILD = "202610031400";
 const TOKEN = (window.FVI_CONFIG && window.FVI_CONFIG.mapboxToken) || "";
 const USE_MAPBOX = /^pk\./.test(TOKEN);
 const GAP = { hidden_danger:["#ff4d6d","Hidden danger","feels safe, people get hurt"], fix_first:["#ff9f1c","Fix first","bad on both counts"],
@@ -89,7 +89,7 @@ const LAYERS = {
   is:{title:"Is: harm (crash record, smoothed)",prop:"harm_score",ramp:["#1f8a4c","#79b64a","#f2c14e","#e8632d","#b1152a"],low:"low harm",high:"high harm",
       blurb:"Harm 0 to 100 from five years of bicyclist injury crashes, smoothed by what streets of the same design usually see (Empirical Bayes). 90 means the worst 10 percent of the network."},
   gap:{title:"Gap: where Feels and Is disagree",blurb:"Where the stress score and the crash record disagree. Hidden danger is the short list to look at first."},
-  trend:{title:"Trend: crashes since 2025 vs before",blurb:"Each block's crash rate since Jan 2025 compared with Oct 2021 to Dec 2024. Rising means at least 1.5x the earlier rate with 2 or more recent crashes. Small counts stay grey."}
+  trend:{title:"Trend: crashes since 2025 vs before",blurb:"Each block's crash rate since Jan 2025 compared with Oct 2021 to Dec 2024, relative to the citywide change (recorded injuries rose about 1.7x across DC). Rising means at least 1.5x that with 2 or more recent crashes. Small counts stay grey."}
 };
 let map, GL, segData, reports, hoverPop, state = { layer:"gap", street:null, ward:null, show:"all" };
 const $ = id => document.getElementById(id);
@@ -120,6 +120,8 @@ function applyFilters(){
   map.setFilter("seg", filt); map.setFilter("seg-case", filt);
   // context: everything else dimmed
   map.setLayoutProperty("seg-dim","visibility", filt ? "visible" : "none");
+  map.setLayoutProperty("seg-changed","visibility", (state.show==="changed" || b) ? "visible" : "none");
+  if (b) map.setFilter("seg-changed", ["all",["has","changed"],b]); else map.setFilter("seg-changed", ["has","changed"]);
   if (filt) map.setFilter("seg-dim", ["!", filt]);
 }
 function setLayer(key){
@@ -192,7 +194,7 @@ function renderReport(kind, key){
       <div class="kpi"><b>${r.harm!=null?r.harm.toFixed(0):"n/a"}</b><span>harm score (citywide median 59)</span></div>
     </div>
     <h4>Trend ${badge(r.trend)}</h4>
-    <div class="blurb" style="margin-top:0">${r.before_per_yr} crashes/yr before 2025 → <b style="color:var(--ink)">${r.after_per_yr}/yr</b> since. ${r.speeding?`Speeding recorded on ${r.speeding}.`:"No speeding recorded."}</div>
+    <div class="blurb" style="margin-top:0">${r.before_per_yr} crashes/yr before 2025 → <b style="color:var(--ink)">${r.after_per_yr}/yr</b> since, which is <b style="color:var(--ink)">${r.trend_ratio!=null?r.trend_ratio+"×":"n/a"}</b> the citywide change (recorded bicyclist injuries rose ${r.base_ratio}× across DC in the same period). ${r.speeding?`Speeding recorded on ${r.speeding}.`:"No speeding recorded."}</div>
     <div class="years">${[2021,2022,2023,2024,2025,2026].map(y=>`<div class="${y>=2025?"recent":""}" style="height:${(yrs[y]||0)/ymax*100}%"><em>${yrs[y]||0}</em><span>${y===2021?"Q4 '21":y===2026?"'26 ytd":"'"+String(y).slice(2)}</span></div>`).join("")}</div>
     <div style="height:14px"></div>
     <h4>Feels: comfort by length</h4>${stackBar(r.lts_km, ltsCol, k=>"LTS "+k)}
@@ -210,9 +212,10 @@ function renderReport(kind, key){
     const csv=rows.map(x=>x.map(v=>`"${String(v??"").replace(/"/g,'""')}"`).join(",")).join("\n"); const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"})); a.download=`feels-vs-is_${title.replace(/\W+/g,"_")}.csv`; a.click(); };
   $("copy").onclick = ()=>{ navigator.clipboard.writeText(location.href).then(()=>toast("Link copied")); };
 }
+function pad(){ return window.innerWidth<=700 ? {left:30,top:30,right:30,bottom:Math.round(window.innerHeight*0.6)} : {left:410,top:40,right:40,bottom:40}; }
 function boundsOf(filterFn){ let b=null; for (const f of segData.features){ if (!filterFn(f.properties)) continue; const cs=f.geometry.type==="LineString"?f.geometry.coordinates:f.geometry.coordinates.flat(); for (const c of cs){ if (!b) b=[[c[0],c[1]],[c[0],c[1]]]; else { b[0][0]=Math.min(b[0][0],c[0]); b[0][1]=Math.min(b[0][1],c[1]); b[1][0]=Math.max(b[1][0],c[0]); b[1][1]=Math.max(b[1][1],c[1]); } } } return b; }
-function openStreet(key, fly=true){ state.street=key; state.ward=null; $("ward").value=""; $("q").value=key; applyFilters(); renderReport("street",key); if (fly){ const b=boundsOf(p=>p.street_key===key); if (b) map.fitBounds(b,{padding:{left:400,top:40,right:40,bottom:40},pitch:0,bearing:0,maxZoom:15.5}); } writeHash(); }
-function openWard(w, fly=true){ state.ward=w; state.street=null; $("q").value=""; $("ward").value=w; applyFilters(); renderReport("ward",w); if (fly){ const b=boundsOf(p=>p.ward===w); if (b) map.fitBounds(b,{padding:{left:400,top:40,right:40,bottom:40},pitch:0,bearing:0}); } writeHash(); }
+function openStreet(key, fly=true){ state.street=key; state.ward=null; $("ward").value=""; $("q").value=key; applyFilters(); renderReport("street",key); if (fly){ const b=boundsOf(p=>p.street_key===key); if (b) map.fitBounds(b,{padding:pad(),pitch:0,bearing:0,maxZoom:15.5}); } writeHash(); }
+function openWard(w, fly=true){ state.ward=w; state.street=null; $("q").value=""; $("ward").value=w; applyFilters(); renderReport("ward",w); if (fly){ const b=boundsOf(p=>p.ward===w); if (b) map.fitBounds(b,{padding:pad(),pitch:0,bearing:0}); } writeHash(); }
 function clearScope(){ state.street=null; state.ward=null; $("q").value=""; $("ward").value=""; applyFilters(); writeHash(); }
 
 /* ---------- search ---------- */
@@ -250,7 +253,7 @@ async function init(){
   map.addLayer({id:"seg-dim",type:"line",source:"segments",layout:{visibility:"none","line-cap":"round","line-join":"round"},paint:{"line-color":"#3a3f4b","line-opacity":0.35,"line-width":width}}, firstSymbol);
   map.addLayer({id:"seg-case",type:"line",source:"segments",layout:{"line-cap":"round","line-join":"round"},paint:{"line-color":"#05060a","line-opacity":0.9,"line-width":["interpolate",["linear"],["zoom"],11,1.8,14,4.8,17,11]}}, firstSymbol);
   map.addLayer({id:"seg",type:"line",source:"segments",layout:{"line-cap":"round","line-join":"round"},paint:{"line-color":"#888","line-opacity":0.95,"line-width":width}}, firstSymbol);
-  map.addLayer({id:"seg-changed",type:"line",source:"segments",filter:["has","changed"],layout:{"line-cap":"butt"},paint:{"line-color":"#ffffff","line-opacity":0.8,"line-width":["interpolate",["linear"],["zoom"],12,0.6,16,1.4],"line-dasharray":[1,2.5],"line-offset":["interpolate",["linear"],["zoom"],12,2,16,6]}}, firstSymbol);
+  map.addLayer({id:"seg-changed",type:"line",source:"segments",filter:["has","changed"],layout:{"line-cap":"butt",visibility:"none"},paint:{"line-color":"#ffffff","line-opacity":0.8,"line-width":["interpolate",["linear"],["zoom"],12,0.6,16,1.4],"line-dasharray":[1,2.5],"line-offset":["interpolate",["linear"],["zoom"],12,2,16,6]}}, firstSymbol);
   const rad = ["interpolate",["linear"],["zoom"],11,["*",0.9,["sqrt",["get","crashes"]]],15,["*",3.4,["sqrt",["get","crashes"]]]];
   map.addLayer({id:"int-ring",type:"circle",source:"intersections",paint:{"circle-radius":rad,"circle-color":"rgba(0,0,0,0)","circle-stroke-color":"#fff","circle-stroke-width":["case",[">",["get","ksi"],0],1.6,0.6],"circle-stroke-opacity":["case",[">",["get","ksi"],0],0.95,0.35]}});
   map.addLayer({id:"int-dot",type:"circle",source:"intersections",paint:{"circle-radius":rad,"circle-color":"#ff4d6d","circle-opacity":0.55,"circle-blur":0.25}});

@@ -759,6 +759,9 @@ def export_web(g: gpd.GeoDataFrame, fit: dict, out_dir: pathlib.Path = CACHE / "
     g = g.copy()
     g["street_key"] = street_key(g["name"])
     g["ward"] = ward.values if ward is not None else ""
+    for col in WEB_FIELDS:
+        if col not in g:
+            g[col] = "too few" if col == "trend" else (0 if col.startswith("crashes_") else None)
     seg = g[[*WEB_FIELDS, "geometry"]].copy()
     seg["geometry"] = seg.geometry.to_crs(METRIC_CRS).simplify(1.0).to_crs("EPSG:4326")
     seg["kid_ok"] = seg["kid_ok"].astype(int)
